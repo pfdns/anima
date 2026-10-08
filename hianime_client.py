@@ -1,9 +1,8 @@
 """
-HiAnime Client - پورت پایتون از ani-cli
+HiAnime Client - استخراج لینک m3u8 + زیرنویس
 """
 import base64
 import json
-import os
 import re
 from typing import List, Dict, Optional
 
@@ -13,7 +12,6 @@ from bs4 import BeautifulSoup
 
 class HiAnimeClient:
     BASE_API = "https://hianime.at"
-    SEARCH_API = BASE_API + "/search?keyword={}"
     EPISODES_API = BASE_API + "/api/theme/episode/list/{}"
     SERVERS_API = BASE_API + "/api/theme/episode/servers?episodeId={}"
 
@@ -41,29 +39,6 @@ class HiAnimeClient:
     def _short_id(self, anime_id: str) -> str:
         return anime_id.split("-")[-1]
 
-    # ---------- SEARCH ----------
-    def search(self, query: str) -> List[Dict[str, str]]:
-        url = self.SEARCH_API.format(requests.utils.quote(query))
-        html = self._get(url)
-
-        if "Just a moment" in html:
-            raise RuntimeError("Blocked by Cloudflare")
-
-        html = html.split('id="main-sidebar"')[0]
-        soup = BeautifulSoup(html, "lxml")
-
-        results = []
-        for item in soup.select("div.film-detail"):
-            a = item.select_one("h3.film-name a")
-            if not a:
-                continue
-            href = a.get("href", "")
-            anime_id = href.rstrip("/").split("/")[-1]
-            title = a.get("title") or a.get_text(strip=True)
-            results.append({"id": anime_id, "title": title})
-
-        return results
-
     # ---------- EPISODES ----------
     def get_episodes(self, anime_id: str) -> List[Dict[str, str]]:
         short = self._short_id(anime_id)
@@ -86,7 +61,6 @@ class HiAnimeClient:
                     "number": ep_num,
                     "title": ep_title,
                 })
-
         return episodes
 
     # ---------- SERVERS ----------
@@ -108,7 +82,6 @@ class HiAnimeClient:
                 "name": item.get("data-server-name", ""),
                 "hash": item.get("data-hash", ""),
             })
-
         return servers
 
     # ---------- DEOBFUSCATE ----------
@@ -118,6 +91,67 @@ class HiAnimeClient:
         key = b"otaku-embed-v1"
         out = bytes(b ^ key[i % len(key)] for i, b in enumerate(raw))
         return out.decode("utf-8", errors="ignore")
+
+    @staticmethod
+    def _parse_subtitles_from_json(json_str: str) -> List[Dict[str, str]]:
+        """پارس دقیق زیرنویس‌ها از JSON"""
+        subtitles = []
+        sub_match = re.search(r'"subtitles"\s*:\s*\[(.*?)\](?=\s*[},])', json_str, re.DOTALL)
+        if not sub_match:
+            return subtitles
+
+        sub_section = sub_match.group(1)
+        item_pattern = re.compile(r'\{(.*?)\}', re.DOTALL)
+
+        for item_match in item_pattern.finditer(sub_section):
+            item = item_match.group(1)
+            lang_m = re.search(r'"lang"\s*:\s*"([^"]*)"', item)
+            label_m = re.search(r'"label"\s*:\s*"([^"]*)"', item)
+            src_m = re.search(r'"src"\s*:\s*"([^"]*)"', item)
+
+            if src_m:
+                subtitles.append({
+                    "lang": lang_m.group(1) if lang_m else "",
+                    "label": label_m.group(1) if label_m else "",
+                    "url": src_m.group(1),
+                })
+
+        return subtitles
+
+    # ---------- DOWNLOAD SUBTITLE (NEW) ----------
+    def download_subtitle(
+        self,
+        url: str,
+        output_path: str,
+        referer: Optional[str] = None,
+    ) -> bool:
+        """
+        دانلود فایل زیرنویس با Referer مناسب
+        Referer برای سرورهای زیرنویس حیاتیه (بدونش 403 می‌ده)
+        """
+        # Referer پیش‌فرض برای zokoanime
+        if not referer:
+            referer = "https://zokoanime.video/"
+
+        headers = {
+            "User-Agent": self.AGENT,
+            "Referer": referer,
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+
+        try:
+            r = self.session.get(url, headers=headers, timeout=30)
+            r.raise_for_status()
+
+            with open(output_path, "wb") as f:
+                f.write(r.content)
+
+            return True
+
+        except requests.exceptions.RequestException as e:
+            print(f"  ⚠️  Download error: {e}")
+            return False
 
     # ---------- M3U8 ----------
     def get_m3u8(self, anime_id: str, episode_number: str, mode: str = "sub") -> Dict:
@@ -144,16 +178,12 @@ class HiAnimeClient:
 
         json_str = self._deobfuscate_blob(m.group(1))
 
-        m3u8_match = re.search(r'"src":"([^"]*\.m3u8[^"]*)"', json_str)
+        m3u8_match = re.search(r'"src"\s*:\s*"([^"]*\.m3u8[^"]*)"', json_str)
         if not m3u8_match:
             raise ValueError("m3u8 not found in blob")
         m3u8_url = m3u8_match.group(1)
 
-        subtitles = []
-        sub_match = re.search(r'"subtitles":\[(.*?)\]', json_str)
-        if sub_match:
-            for s in re.finditer(r'"src":"([^"]*)".*?"label":"([^"]*)"', sub_match.group(1)):
-                subtitles.append({"url": s.group(1), "label": s.group(2)})
+        subtitles = self._parse_subtitles_from_json(json_str)
 
         return {
             "m3u8": m3u8_url,
@@ -161,26 +191,14 @@ class HiAnimeClient:
             "referer": referer,
         }
 
-    # ---------- SUBTITLE ----------
-    def get_english_subtitle_url(self, anime_id: str, episode_number: str) -> Optional[str]:
-        """لینک زیرنویس انگلیسی رو برمی‌گردونه"""
-        result = self.get_m3u8(anime_id, episode_number, mode="sub")
-        subtitles = result.get("subtitles", [])
-        for sub in subtitles:
-            label = sub.get("label", "").lower()
-            if "english" in label or label == "en":
-                return sub["url"]
-        return subtitles[0]["url"] if subtitles else None
 
-    def download_subtitle(self, subtitle_url: str, output_path: str) -> bool:
-        """دانلود فایل زیرنویس از یه URL"""
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        try:
-            r = self.session.get(subtitle_url, timeout=self.timeout)
-            r.raise_for_status()
-            with open(output_path, "wb") as f:
-                f.write(r.content)
-            return True
-        except Exception as e:
-            print(f"  ⚠️  Subtitle download error: {e}")
-            return False
+if __name__ == "__main__":
+    client = HiAnimeClient(proxy="http://127.0.0.1:2080")
+    result = client.get_m3u8("jujutsu-kaisen-237", "6")
+    print(f"Referer: {result['referer']}")
+    print(f"m3u8: {result['m3u8'][:80]}...")
+    print()
+    print(f"Subtitles ({len(result['subtitles'])}):")
+    for sub in result["subtitles"]:
+        print(f"  [{sub['label']}]")
+        print(f"  {sub['url'][:80]}...")
