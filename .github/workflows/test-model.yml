@@ -21,27 +21,33 @@ jobs:
         run: |
           nohup ollama serve > /tmp/ollama.log 2>&1 &
           sleep 10
-          curl -s http://localhost:11434/api/tags || echo "not ready"
 
       - name: Cache model
         id: cache
         uses: actions/cache@v4
         with:
           path: models/
-          key: hy-mt2-1.8b-q4-v1
+          key: hy-mt2-1.8b-q4-v2
 
-      - name: Download GGUF from HuggingFace
+      - name: Download GGUF
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p models
-          echo "Downloading Hy-MT2 1.8B Q4_K_M..."
           wget -q --show-progress "https://huggingface.co/mradermacher/Hy-MT2-1.8B-GGUF/resolve/main/Hy-MT2-1.8B.Q4_K_M.gguf" -O models/hy-mt2.gguf
           ls -lh models/
 
-      - name: Register with Ollama
+      - name: Register with Ollama (optimized)
         run: |
-          printf 'FROM ./models/hy-mt2.gguf\nPARAMETER temperature 0.1\nPARAMETER top_p 0.5\nPARAMETER num_ctx 1024\n' > Modelfile
-          cat Modelfile
+          cat > Modelfile << 'EOF'
+          FROM ./models/hy-mt2.gguf
+          PARAMETER temperature 0.0
+          PARAMETER top_p 0.1
+          PARAMETER top_k 1
+          PARAMETER repeat_penalty 1.3
+          PARAMETER repeat_last_n 64
+          PARAMETER num_ctx 512
+          PARAMETER stop "\n\n"
+          EOF
           ollama create hy-mt2 -f Modelfile
           ollama list
 
@@ -53,56 +59,62 @@ jobs:
       - name: Install deps
         run: pip install requests
 
-      - name: Test 1 - Simple sentence
+      - name: Test with different prompts
         run: |
-          python3 -c "
+          python3 << 'PYEOF'
           import requests
-          r = requests.post('http://localhost:11434/api/generate', json={
-              'model': 'hy-mt2',
-              'prompt': 'Translate to Persian: Hello, how are you today?',
-              'stream': False,
-              'options': {'temperature': 0.1, 'num_predict': 100, 'num_ctx': 512}
-          }, timeout=180)
-          print('TEST 1:', r.json().get('response', 'NO RESPONSE'))
-          "
+          import re
 
-      - name: Test 2 - Subtitle line
-        run: |
-          python3 -c "
-          import requests
-          r = requests.post('http://localhost:11434/api/generate', json={
-              'model': 'hy-mt2',
-              'prompt': 'Translate to Persian: Dont look inside me without permission. I hate it.',
-              'stream': False,
-              'options': {'temperature': 0.1, 'num_predict': 100, 'num_ctx': 512}
-          }, timeout=180)
-          print('TEST 2:', r.json().get('response', 'NO RESPONSE'))
-          "
+          def translate(text, prompt_template):
+              prompt = prompt_template.format(text=text)
+              r = requests.post('http://localhost:11434/api/generate', json={
+                  'model': 'hy-mt2',
+                  'prompt': prompt,
+                  'stream': False,
+                  'options': {
+                      'temperature': 0.0,
+                      'top_p': 0.1,
+                      'top_k': 1,
+                      'repeat_penalty': 1.3,
+                      'num_predict': 200,
+                      'num_ctx': 512,
+                  }
+              }, timeout=180)
+              result = r.json().get('response', '')
+              # پاکسازی
+              result = re.sub(r'\n\n.*', '', result, flags=re.DOTALL)
+              result = result.strip()
+              return result
 
-      - name: Test 3 - Anime term
-        run: |
-          python3 -c "
-          import requests
-          r = requests.post('http://localhost:11434/api/generate', json={
-              'model': 'hy-mt2',
-              'prompt': 'Translate to Persian: Cursed Energy',
-              'stream': False,
-              'options': {'temperature': 0.1, 'num_predict': 50, 'num_ctx': 512}
-          }, timeout=180)
-          print('TEST 3:', r.json().get('response', 'NO RESPONSE'))
-          "
+          test_cases = [
+              "Hello, how are you today?",
+              "Don't look inside me without permission. I hate it.",
+              "Cursed Energy",
+              "Domain Expansion",
+              "I want to become stronger.",
+          ]
 
-      - name: Test 4 - Model info
-        run: |
-          python3 -c "
-          import requests
-          r = requests.post('http://localhost:11434/api/show', json={'name': 'hy-mt2'}, timeout=30)
-          data = r.json()
-          print('MODEL INFO:')
-          print('  Family:', data.get('details', {}).get('family'))
-          print('  Parameter size:', data.get('details', {}).get('parameter_size'))
-          print('  Quantization:', data.get('details', {}).get('quantization_level'))
-          "
+          # پرامپت‌های مختلف
+          prompts = {
+              "A": "Translate to Persian:\n{text}",
+              "B": "Persian translation: {text}\nPersian:",
+              "C": "Translate this to Farsi: {text}\nFarsi:",
+              "D": "{text}\n\nPersian:",
+          }
+
+          print("=" * 60)
+          print("TESTING DIFFERENT PROMPTS")
+          print("=" * 60)
+
+          for pname, ptmpl in prompts.items():
+              print(f"\n--- Prompt {pname} ---")
+              for text in test_cases:
+                  result = translate(text, ptmpl)
+                  print(f"EN: {text}")
+                  print(f"FA: {result}")
+                  print()
+
+          PYEOF
 
       - name: Show Ollama logs
         if: always()
