@@ -160,27 +160,34 @@ class HiAnimeClient:
     def get_english_subtitle_url(self, anime_id: str, episode_number: str) -> Optional[Dict[str, str]]:
         """
         گرفتن URL زیرنویس انگلیسی برای یه اپیزود
-        برمی‌گردونه: {"url": ..., "referer": ..., "label": ...}
+        فقط بر اساس label فیلتر می‌کنه (lang همیشه 'en' هست و قابل اعتماد نیست)
         """
         result = self.get_m3u8(anime_id, episode_number)
 
-        # دنبال زیرنویس انگلیسی بگرد
-        english_sub = None
-        for sub in result.get("subtitles", []):
-            label = sub.get("label", "").lower()
-            lang = sub.get("lang", "").lower()
-            if "english" in label or lang == "en":
-                english_sub = sub
-                break
-
-        if not english_sub:
+        subtitles = result.get("subtitles", [])
+        if not subtitles:
             return None
 
-        return {
-            "url": english_sub["url"],
-            "label": english_sub["label"],
-            "referer": result["referer"],
-        }
+        # استراتژی ۱: label دقیقاً "English"
+        for sub in subtitles:
+            if sub.get("label", "").strip().lower() == "english":
+                return {
+                    "url": sub["url"],
+                    "label": sub["label"],
+                    "referer": result["referer"],
+                }
+
+        # استراتژی ۲: label شامل "english" (ولی نه عربی)
+        for sub in subtitles:
+            label = sub.get("label", "").strip().lower()
+            if "english" in label and "arabic" not in label:
+                return {
+                    "url": sub["url"],
+                    "label": sub["label"],
+                    "referer": result["referer"],
+                }
+
+        return None
 
     # ---------- DOWNLOAD SUBTITLE ----------
     def download_subtitle(
