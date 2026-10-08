@@ -21,10 +21,34 @@ jobs:
         run: |
           nohup ollama serve > /tmp/ollama.log 2>&1 &
           sleep 10
+          curl -s http://localhost:11434/api/tags || echo "not ready"
 
-      - name: Pull Hy-MT2 model
+      - name: Cache model file
+        id: cache-model
+        uses: actions/cache@v4
+        with:
+          path: models/
+          key: hy-mt2-1.8b-q4-v1
+
+      - name: Download Hy-MT2 GGUF from HuggingFace
+        if: steps.cache-model.outputs.cache-hit != 'true'
         run: |
-          ollama pull hy-mt2
+          mkdir -p models
+          echo "📥 Downloading Hy-MT2 1.8B Q4_K_M..."
+          wget -q --show-progress \
+            "https://huggingface.co/mradermacher/Hy-MT2-1.8B-GGUF/resolve/main/Hy-MT2-1.8B.Q4_K_M.gguf" \
+            -O models/hy-mt2.gguf
+          ls -lh models/
+
+      - name: Register model with Ollama
+        run: |
+          cat > Modelfile << 'EOF'
+FROM ./models/hy-mt2.gguf
+PARAMETER temperature 0.1
+PARAMETER top_p 0.5
+PARAMETER num_ctx 1024
+EOF
+          ollama create hy-mt2 -f Modelfile
           ollama list
 
       - name: Setup Python
@@ -74,29 +98,19 @@ jobs:
           print('TEST 3:', r.json().get('response', 'NO RESPONSE'))
           "
 
-      - name: Test 4 - No instruction (raw)
-        run: |
-          python3 -c "
-          import requests
-          r = requests.post('http://localhost:11434/api/generate', json={
-              'model': 'hy-mt2',
-              'prompt': 'Hello, how are you today?',
-              'stream': False,
-              'options': {'temperature': 0.1, 'num_predict': 100, 'num_ctx': 512}
-          }, timeout=180)
-          print('TEST 4 (raw):', r.json().get('response', 'NO RESPONSE'))
-          "
-
-      - name: Test 5 - Ask model info
+      - name: Test 4 - Model info
         run: |
           python3 -c "
           import requests
           r = requests.post('http://localhost:11434/api/show', json={'name': 'hy-mt2'}, timeout=30)
+          data = r.json()
           print('MODEL INFO:')
-          print(r.json())
+          print('  Family:', data.get('details', {}).get('family'))
+          print('  Parameter size:', data.get('details', {}).get('parameter_size'))
+          print('  Quantization:', data.get('details', {}).get('quantization_level'))
           "
 
-      - name: Show logs
+      - name: Show Ollama logs
         if: always()
         run: |
           echo "=== Ollama log ==="
