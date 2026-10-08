@@ -33,7 +33,7 @@ data/
 # Secrets
 keys.json
 
-# Models
+# Models (downloaded in GitHub Actions, not stored in repo)
 models/
 *.gguf
 *.bin

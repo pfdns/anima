@@ -1,4 +1,4 @@
-name: Auto Translate Episode
+name: Auto Translate Episode (Qwen 2.5)
 
 on:
   workflow_dispatch:
@@ -29,21 +29,26 @@ jobs:
       - name: Install Python dependencies
         run: pip install requests beautifulsoup4 lxml
 
-      - name: Cache Hy-MT2 GGUF Model
+      - name: Cache Qwen 2.5 GGUF Model
         id: cache-model
         uses: actions/cache@v4
         with:
-          path: models/hy-mt2.gguf
-          key: hy-mt2-1.8b-q4-v1
+          path: models/qwen2.5-7b.gguf
+          key: qwen2.5-7b-q4-v1
 
-      - name: Download Hy-MT2 GGUF
+      - name: Download Qwen 2.5 GGUF
         if: steps.cache-model.outputs.cache-hit != 'true'
         run: |
-          echo "⬇️ Downloading Hy-MT2 1.8B Q4_K_M..."
+          echo "⬇️ Downloading Qwen 2.5 7B Q4_K_M..."
           mkdir -p models
-          curl -L --fail --retry 3 -o models/hy-mt2.gguf \
-            "https://huggingface.co/mradermacher/Hy-MT2-1.8B-GGUF/resolve/main/Hy-MT2-1.8B.Q4_K_M.gguf"
+          wget --continue --tries=3 --timeout=120 \
+            "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf" \
+            -O models/qwen2.5-7b.gguf
           ls -lh models/
+          if [ ! -s models/qwen2.5-7b.gguf ]; then
+            echo "❌ Download failed or file is empty!"
+            exit 1
+          fi
 
       - name: Install Ollama
         run: |
@@ -58,9 +63,9 @@ jobs:
           sleep 10
           curl -s http://localhost:11434/api/tags || echo "Ollama not ready"
 
-      - name: Create Ollama model
+      - name: Create Ollama model from Modelfile
         run: |
-          ollama create hy-mt2 -f Modelfile
+          ollama create qwen2.5-7b -f Modelfile
           ollama list
 
       - name: Run auto translation
