@@ -1,6 +1,5 @@
 """
-Auto Translate - ترجمه خودکار یه اپیزود با Hy-MT2
-Usage: python3 auto_translate.py <anilist_id> [--episode N]
+Auto Translate - با Qwen 2.5 7B
 """
 import os
 import sys
@@ -12,29 +11,38 @@ import requests
 
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "hy-mt2"
+MODEL = "qwen2.5-7b"
 SUBTITLE_DIR = "subtitles"
 OUTPUT_DIR = "output"
 
 
 def translate(text, max_retries=2):
-    """ترجمه ساده با Hy-MT2"""
+    """ترجمه با Qwen 2.5 - پرامپت ساده و مستقیم"""
     if not text or not text.strip():
         return ""
 
-    prompt = f"Translate to Persian:\n{text}"
+    # پرامپت chat-style برای Qwen
+    prompt = f"""<|im_start|>system
+You are a professional English-to-Persian subtitle translator. Translate naturally and conversationally. Only output the translation, nothing else.
+<|im_end|>
+<|im_start|>user
+Translate this to Persian: {text}
+<|im_end|>
+<|im_start|>assistant
+"""
 
     payload = {
         "model": MODEL,
         "prompt": prompt,
         "stream": False,
         "options": {
-            "temperature": 0.0,
-            "top_p": 0.1,
-            "top_k": 1,
-            "repeat_penalty": 1.3,
+            "temperature": 0.3,
+            "top_p": 0.8,
+            "top_k": 20,
+            "repeat_penalty": 1.1,
             "num_predict": 512,
-            "num_ctx": 512,
+            "num_ctx": 2048,
+            "stop": ["<|im_end|>", "<|im_start|>", "\n\n"],
         },
     }
 
@@ -44,12 +52,11 @@ def translate(text, max_retries=2):
             r.raise_for_status()
             result = r.json().get("response", "").strip()
 
-            # پاکسازی: حذف متن‌های اضافی
-            result = re.sub(r"\n\n.*", "", result, flags=re.DOTALL)
+            # پاکسازی
+            result = result.split("\n")[0].strip()
             result = re.sub(r"^(Persian|Farsi|Translation|ترجمه)[:\s]*", "", result, flags=re.IGNORECASE)
             result = result.strip()
 
-            # اگه خروجی خیلی طولانی بود، رد کن
             if len(result) > len(text) * 5:
                 return text
 
@@ -63,7 +70,6 @@ def translate(text, max_retries=2):
 
 
 def check_ollama():
-    """چک کن Ollama آماده‌ست"""
     for i in range(20):
         try:
             r = requests.get("http://localhost:11434/api/tags", timeout=5)
@@ -79,7 +85,6 @@ def check_ollama():
 
 
 def convert_vtt_to_srt(vtt_content):
-    """تبدیل VTT به SRT"""
     if not vtt_content.strip().startswith("WEBVTT"):
         return vtt_content
 
@@ -126,11 +131,9 @@ def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(SUBTITLE_DIR, exist_ok=True)
 
-    # ===== چک Ollama =====
     if not check_ollama():
         sys.exit(1)
 
-    # ===== مپ کردن =====
     from hianime_mapper import HiAnimeMapper
     from hianime_client import HiAnimeClient
 
@@ -146,45 +149,35 @@ def main():
         sys.exit(1)
     print(f"✅ Episode {episode_num}: {ep['title']}")
 
-    # ===== دانلود زیرنویس =====
     client = HiAnimeClient()
     sub_info = client.get_english_subtitle_url(hianime_id, str(episode_num))
     if not sub_info:
         print("❌ No English subtitle found")
         sys.exit(1)
 
-    print(f"✅ Found English subtitle: {sub_info['label']}")
+    print(f"✅ Found: {sub_info['label']}")
 
     sub_path = os.path.join(SUBTITLE_DIR, f"episode_{episode_num}_en.srt")
-    print(f"\n⬇️  Downloading subtitle...")
-
-    # ✅ اینجا درست شد: URL و referer جدا پاس داده می‌شن
     if not client.download_subtitle(sub_info["url"], sub_path, referer=sub_info["referer"]):
-        print("❌ Subtitle download failed")
+        print("❌ Download failed")
         sys.exit(1)
 
     with open(sub_path, "r", encoding="utf-8", errors="ignore") as f:
         content = f.read()
 
     if content.strip().startswith("WEBVTT"):
-        print("🔄 Converting VTT to SRT...")
         content = convert_vtt_to_srt(content)
         with open(sub_path, "w", encoding="utf-8") as f:
             f.write(content)
 
-    print(f"✅ Subtitle saved: {sub_path} ({len(content)} chars)")
+    print(f"✅ Subtitle: {len(content)} chars")
 
-    # ===== ترجمه زیرنویس =====
-    print(f"\n" + "=" * 60)
-    print(f"🎬 Translating subtitle")
-    print(f"=" * 60)
-
+    # ترجمه - فقط ۲۰ بلاک اول تست
     blocks = re.split(r"\n\s*\n", content.strip())
     translated_blocks = []
+    TEST_LIMIT = 20
 
-    # فقط ۳۰ بلاک اول رو ترجمه کن (تست)
-    TEST_LIMIT = 30
-
+    print(f"\n🎬 Translating (test: {TEST_LIMIT} blocks)...")
     for i, block in enumerate(blocks, 1):
         lines = block.strip().split("\n")
         if len(lines) < 3:
@@ -195,28 +188,21 @@ def main():
         timing = lines[1]
         text = "\n".join(lines[2:])
 
-        print(f"[{i}/{len(blocks)}] {text[:50]}")
-
         if i <= TEST_LIMIT:
             translated = translate(text)
-            print(f"   → {translated[:50]}")
+            print(f"[{i}] {text[:40]} → {translated[:40]}")
         else:
             translated = text
 
         translated_blocks.append(f"{index}\n{timing}\n{translated}")
 
         if i >= TEST_LIMIT:
-            print(f"\n⏸️  Stopped after {TEST_LIMIT} blocks (test mode)")
             break
 
     out_path = os.path.join(OUTPUT_DIR, f"episode_{episode_num}_fa.srt")
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n\n".join(translated_blocks))
     print(f"\n💾 Saved: {out_path}")
-
-    print("\n" + "=" * 60)
-    print("✅ DONE (test mode)")
-    print("=" * 60)
 
 
 if __name__ == "__main__":
