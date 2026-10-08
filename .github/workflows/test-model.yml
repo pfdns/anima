@@ -23,31 +23,25 @@ jobs:
           sleep 10
           curl -s http://localhost:11434/api/tags || echo "not ready"
 
-      - name: Cache model file
-        id: cache-model
+      - name: Cache model
+        id: cache
         uses: actions/cache@v4
         with:
           path: models/
           key: hy-mt2-1.8b-q4-v1
 
-      - name: Download Hy-MT2 GGUF from HuggingFace
-        if: steps.cache-model.outputs.cache-hit != 'true'
+      - name: Download GGUF from HuggingFace
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p models
-          echo "📥 Downloading Hy-MT2 1.8B Q4_K_M..."
-          wget -q --show-progress \
-            "https://huggingface.co/mradermacher/Hy-MT2-1.8B-GGUF/resolve/main/Hy-MT2-1.8B.Q4_K_M.gguf" \
-            -O models/hy-mt2.gguf
+          echo "Downloading Hy-MT2 1.8B Q4_K_M..."
+          wget -q --show-progress "https://huggingface.co/mradermacher/Hy-MT2-1.8B-GGUF/resolve/main/Hy-MT2-1.8B.Q4_K_M.gguf" -O models/hy-mt2.gguf
           ls -lh models/
 
-      - name: Register model with Ollama
+      - name: Register with Ollama
         run: |
-          cat > Modelfile << 'EOF'
-FROM ./models/hy-mt2.gguf
-PARAMETER temperature 0.1
-PARAMETER top_p 0.5
-PARAMETER num_ctx 1024
-EOF
+          printf 'FROM ./models/hy-mt2.gguf\nPARAMETER temperature 0.1\nPARAMETER top_p 0.5\nPARAMETER num_ctx 1024\n' > Modelfile
+          cat Modelfile
           ollama create hy-mt2 -f Modelfile
           ollama list
 
@@ -65,7 +59,7 @@ EOF
           import requests
           r = requests.post('http://localhost:11434/api/generate', json={
               'model': 'hy-mt2',
-              'prompt': 'Translate this English sentence to Persian (Farsi).\n\nEnglish: Hello, how are you today?\n\nPersian:',
+              'prompt': 'Translate to Persian: Hello, how are you today?',
               'stream': False,
               'options': {'temperature': 0.1, 'num_predict': 100, 'num_ctx': 512}
           }, timeout=180)
@@ -78,7 +72,7 @@ EOF
           import requests
           r = requests.post('http://localhost:11434/api/generate', json={
               'model': 'hy-mt2',
-              'prompt': 'Translate this English sentence to Persian (Farsi).\n\nEnglish: Don\\'t look inside me without permission. I hate it...\n\nPersian:',
+              'prompt': 'Translate to Persian: Dont look inside me without permission. I hate it.',
               'stream': False,
               'options': {'temperature': 0.1, 'num_predict': 100, 'num_ctx': 512}
           }, timeout=180)
@@ -91,7 +85,7 @@ EOF
           import requests
           r = requests.post('http://localhost:11434/api/generate', json={
               'model': 'hy-mt2',
-              'prompt': 'Translate this English anime term to Persian (Farsi).\n\nEnglish: Cursed Energy\n\nPersian:',
+              'prompt': 'Translate to Persian: Cursed Energy',
               'stream': False,
               'options': {'temperature': 0.1, 'num_predict': 50, 'num_ctx': 512}
           }, timeout=180)
@@ -112,6 +106,4 @@ EOF
 
       - name: Show Ollama logs
         if: always()
-        run: |
-          echo "=== Ollama log ==="
-          cat /tmp/ollama.log | tail -20
+        run: cat /tmp/ollama.log | tail -20

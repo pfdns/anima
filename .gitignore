@@ -21,8 +21,11 @@ env/
 .DS_Store
 Thumbs.db
 
-# Project
+# Project outputs
+output/
 outputs/
+subtitles/
+glossaries/
 data/
 *.log
 *.progress
@@ -30,11 +33,8 @@ data/
 # Secrets
 keys.json
 
-# Models (large files - cached in GitHub Actions)
+# Models
+models/
+*.gguf
 *.bin
 .ollama/
-
-# Glossaries (generated)
-glossaries/*.json
-glossaries/*.txt
-models/*.gguf
