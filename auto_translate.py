@@ -1,6 +1,6 @@
 """
 Auto Translate - ترجمه خودکار یه اپیزود با Hy-MT2
-Usage: python3 auto_translate.py <anilist_id> <season> <episode>
+Usage: python3 auto_translate.py <anilist_id> [--season N] [--episode N]
 """
 import os
 import sys
@@ -9,7 +9,6 @@ import re
 import time
 import argparse
 import requests
-from pathlib import Path
 
 from anilist_client import AniListClient
 from glossary_builder import build_and_save, load_glossary, build_glossary_text
@@ -297,14 +296,16 @@ def main():
     print(f"✅ Episode {episode_num}: {ep['title']}")
 
     client = HiAnimeClient()
-    sub_url = client.get_english_subtitle_url(hianime_id, str(episode_num))
-    if not sub_url:
+    sub_info = client.get_english_subtitle_url(hianime_id, str(episode_num))
+    if not sub_info:
         print("❌ No English subtitle found")
         sys.exit(1)
 
+    print(f"✅ Found English subtitle: {sub_info['label']}")
+
     sub_path = os.path.join(SUBTITLE_DIR, f"episode_{episode_num}_en.srt")
     print(f"\n⬇️  Downloading subtitle...")
-    if not client.download_subtitle(sub_url, sub_path):
+    if not client.download_subtitle(sub_info["url"], sub_path, referer=sub_info["referer"]):
         print("❌ Subtitle download failed")
         sys.exit(1)
 
