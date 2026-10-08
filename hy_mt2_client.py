@@ -64,7 +64,8 @@ Text:
                 "temperature": 0.3,
                 "top_p": 0.6,
                 "top_k": 20,
-                "repetition_penalty": 1.05,
+                "repeat_penalty": 1.05,
+                "num_ctx": 8192,
                 "num_predict": 4096,
             },
         }

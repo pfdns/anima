@@ -1,0 +1,75 @@
+name: Hy-MT2 Translation
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'input/**'
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Kill any existing Ollama process
+        run: |
+          pkill -f "ollama serve" || true
+          sleep 2
+
+      - name: Start Ollama server
+        run: |
+          nohup ollama serve > /tmp/ollama.log 2>&1 &
+          sleep 8
+          curl -s http://localhost:11434/api/tags || echo "Server not ready yet"
+
+      - name: Verify GGUF model exists
+        run: |
+          ls -lh models/
+          if [ ! -f models/hy-mt2.gguf ]; then
+            echo "❌ models/hy-mt2.gguf not found!"
+            exit 1
+          fi
+
+      - name: Create Ollama model from Modelfile
+        run: |
+          ollama create hy-mt2:1.8b -f Modelfile
+          ollama list
+
+      - name: Test translation client
+        run: |
+          python3 hy_mt2_client.py
+
+      - name: Show Ollama log on failure
+        if: failure()
+        run: |
+          echo "=== Ollama log ==="
+          cat /tmp/ollama.log || true
+
+      - name: Upload glossaries as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: glossaries
+          path: glossaries/
+          if-no-files-found: warn
+          retention-days: 7

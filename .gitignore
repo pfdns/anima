@@ -31,8 +31,6 @@ data/
 keys.json
 
 # Models (large files - cached in GitHub Actions)
-models/
-*.gguf
 *.bin
 .ollama/
 
