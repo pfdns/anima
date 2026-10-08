@@ -16,13 +16,36 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          lfs: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Cache Hy-MT2 GGUF Model
+        id: cache-model
+        uses: actions/cache@v4
+        with:
+          path: models/hy-mt2.gguf
+          key: hy-mt2-1.8b-q4-v1
+
+      - name: Download Hy-MT2 GGUF
+        if: steps.cache-model.outputs.cache-hit != 'true'
+        run: |
+          echo "⬇️ Downloading Hy-MT2 1.8B Q4_K_M from Hugging Face..."
+          mkdir -p models
+          curl -L --fail --retry 3 -o models/hy-mt2.gguf \
+            "https://huggingface.co/mradermacher/Hy-MT2-1.8B-GGUF/resolve/main/Hy-MT2-1.8B.Q4_K_M.gguf"
+          ls -lh models/
+          if [ ! -s models/hy-mt2.gguf ]; then
+            echo "❌ Download failed or file is empty!"
+            exit 1
+          fi
+
+      - name: Verify model
+        run: |
+          ls -lh models/
+          file models/hy-mt2.gguf
 
       - name: Install Python dependencies
         run: pip install requests beautifulsoup4 lxml
@@ -32,20 +55,16 @@ jobs:
           curl -fsSL https://ollama.com/install.sh | sh
           ollama --version
 
-      - name: Kill any existing Ollama process
+      - name: Start Ollama server
         run: |
           pkill -f "ollama serve" || true
           sleep 2
-
-      - name: Start Ollama server
-        run: |
           nohup ollama serve > /tmp/ollama.log 2>&1 &
           sleep 10
           curl -s http://localhost:11434/api/tags || echo "Ollama not ready"
 
       - name: Create Ollama model from Modelfile
         run: |
-          ls -lh models/
           ollama create hy-mt2 -f Modelfile
           ollama list
 

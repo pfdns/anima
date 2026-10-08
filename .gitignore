@@ -37,3 +37,4 @@ keys.json
 # Glossaries (generated)
 glossaries/*.json
 glossaries/*.txt
+models/*.gguf
