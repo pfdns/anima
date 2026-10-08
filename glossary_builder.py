@@ -34,7 +34,7 @@ def extract_glossary_data(anilist_id: int) -> Optional[Dict[str, Any]]:
 
     # --- Tags (فقط rank >= 60) ---
     tags = []
-    for t in media.get("tags", []):
+    for t in media.get("tags", []) or []:
         if t.get("rank", 0) >= 60:
             tags.append({
                 "name": t.get("name"),
@@ -46,12 +46,12 @@ def extract_glossary_data(anilist_id: int) -> Optional[Dict[str, Any]]:
 
     # --- Characters (فقط MAIN و SUPPORTING) ---
     characters = []
-    for edge in media.get("characters", {}).get("edges", []):
+    for edge in (media.get("characters") or {}).get("edges", []) or []:
         role = edge.get("role", "")
         if role not in ("MAIN", "SUPPORTING"):
             continue
-        node = edge.get("node", {})
-        name = node.get("name", {})
+        node = edge.get("node") or {}
+        name = node.get("name") or {}
         desc = clean_text(node.get("description"))
         characters.append({
             "name_full": name.get("full"),
@@ -62,10 +62,10 @@ def extract_glossary_data(anilist_id: int) -> Optional[Dict[str, Any]]:
 
     # --- Relations ---
     relations = []
-    for edge in media.get("relations", {}).get("edges", []):
+    for edge in (media.get("relations") or {}).get("edges", []) or []:
         rel_type = edge.get("relationType", "")
-        node = edge.get("node", {})
-        title = node.get("title", {})
+        node = edge.get("node") or {}
+        title = node.get("title") or {}
         relations.append({
             "relation_type": rel_type,
             "title": title.get("english") or title.get("romaji"),
@@ -76,19 +76,19 @@ def extract_glossary_data(anilist_id: int) -> Optional[Dict[str, Any]]:
     # --- Studios ---
     studios = [
         s.get("name")
-        for s in media.get("studios", {}).get("nodes", [])
+        for s in (media.get("studios") or {}).get("nodes", []) or []
     ]
 
     return {
         "anilist_id": anilist_id,
         "id_mal": media.get("idMal"),
         "title": {
-            "romaji": media.get("title", {}).get("romaji"),
-            "english": media.get("title", {}).get("english"),
-            "native": media.get("title", {}).get("native"),
+            "romaji": (media.get("title") or {}).get("romaji"),
+            "english": (media.get("title") or {}).get("english"),
+            "native": (media.get("title") or {}).get("native"),
         },
         "description": clean_text(media.get("description")),
-        "genres": media.get("genres", []),
+        "genres": media.get("genres", []) or [],
         "format": media.get("format"),
         "season_year": media.get("seasonYear"),
         "episodes": media.get("episodes"),
@@ -188,4 +188,4 @@ if __name__ == "__main__":
     data = build_and_save(anilist_id)
     if data:
         print()
-        print(build_glossary_text(data)[:1000])
+        print(build_glossary_text(data)[:2000])

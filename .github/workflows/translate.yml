@@ -1,4 +1,4 @@
-name: Translate with Hy-MT2
+name: Auto Translate Episode
 
 on:
   workflow_dispatch:
@@ -7,6 +7,10 @@ on:
         description: "AniList ID"
         required: true
         default: "113415"
+      episode:
+        description: "Episode number"
+        required: true
+        default: "6"
 
 jobs:
   translate:
@@ -22,6 +26,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install Python dependencies
+        run: pip install requests beautifulsoup4 lxml
+
       - name: Cache Hy-MT2 GGUF Model
         id: cache-model
         uses: actions/cache@v4
@@ -32,23 +39,11 @@ jobs:
       - name: Download Hy-MT2 GGUF
         if: steps.cache-model.outputs.cache-hit != 'true'
         run: |
-          echo "⬇️ Downloading Hy-MT2 1.8B Q4_K_M from Hugging Face..."
+          echo "⬇️ Downloading Hy-MT2 1.8B Q4_K_M..."
           mkdir -p models
           curl -L --fail --retry 3 -o models/hy-mt2.gguf \
             "https://huggingface.co/mradermacher/Hy-MT2-1.8B-GGUF/resolve/main/Hy-MT2-1.8B.Q4_K_M.gguf"
           ls -lh models/
-          if [ ! -s models/hy-mt2.gguf ]; then
-            echo "❌ Download failed or file is empty!"
-            exit 1
-          fi
-
-      - name: Verify model
-        run: |
-          ls -lh models/
-          file models/hy-mt2.gguf
-
-      - name: Install Python dependencies
-        run: pip install requests beautifulsoup4 lxml
 
       - name: Install Ollama
         run: |
@@ -63,20 +58,25 @@ jobs:
           sleep 10
           curl -s http://localhost:11434/api/tags || echo "Ollama not ready"
 
-      - name: Create Ollama model from Modelfile
+      - name: Create Ollama model
         run: |
           ollama create hy-mt2 -f Modelfile
           ollama list
 
-      - name: Build Glossary from AniList
-        run: python3 glossary_builder.py ${{ github.event.inputs.anilist_id }}
+      - name: Run auto translation
+        run: |
+          python3 auto_translate.py ${{ github.event.inputs.anilist_id }} \
+            --episode ${{ github.event.inputs.episode }}
 
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: glossary-${{ github.event.inputs.anilist_id }}
-          path: glossaries/
+          name: translation-${{ github.event.inputs.anilist_id }}-ep${{ github.event.inputs.episode }}
+          path: |
+            output/
+            subtitles/
+            glossaries/
           retention-days: 7
           if-no-files-found: warn
 
@@ -85,5 +85,3 @@ jobs:
         run: |
           echo "=== Ollama log ==="
           cat /tmp/ollama.log || true
-          echo ""
-          df -h

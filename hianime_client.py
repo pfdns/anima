@@ -3,6 +3,7 @@ HiAnime Client - پورت پایتون از ani-cli
 """
 import base64
 import json
+import os
 import re
 from typing import List, Dict, Optional
 
@@ -38,7 +39,6 @@ class HiAnimeClient:
         return r.text
 
     def _short_id(self, anime_id: str) -> str:
-        """ani-cli فقط آخرین بخش عددی رو می‌فرسته"""
         return anime_id.split("-")[-1]
 
     # ---------- SEARCH ----------
@@ -70,7 +70,6 @@ class HiAnimeClient:
         url = self.EPISODES_API.format(short)
         html = self._get(url)
 
-        # اگه JSON بود، محتوای html رو دربیار
         if html.strip().startswith("{"):
             data = json.loads(html)
             html = data.get("html", "")
@@ -161,3 +160,27 @@ class HiAnimeClient:
             "subtitles": subtitles,
             "referer": referer,
         }
+
+    # ---------- SUBTITLE ----------
+    def get_english_subtitle_url(self, anime_id: str, episode_number: str) -> Optional[str]:
+        """لینک زیرنویس انگلیسی رو برمی‌گردونه"""
+        result = self.get_m3u8(anime_id, episode_number, mode="sub")
+        subtitles = result.get("subtitles", [])
+        for sub in subtitles:
+            label = sub.get("label", "").lower()
+            if "english" in label or label == "en":
+                return sub["url"]
+        return subtitles[0]["url"] if subtitles else None
+
+    def download_subtitle(self, subtitle_url: str, output_path: str) -> bool:
+        """دانلود فایل زیرنویس از یه URL"""
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        try:
+            r = self.session.get(subtitle_url, timeout=self.timeout)
+            r.raise_for_status()
+            with open(output_path, "wb") as f:
+                f.write(r.content)
+            return True
+        except Exception as e:
+            print(f"  ⚠️  Subtitle download error: {e}")
+            return False

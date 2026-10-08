@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any, List
 class AniListClient:
     API_URL = "https://graphql.anilist.co"
 
-    # کوئری کامل برای یه انیمه خاص
+    # کوئری کامل برای یه انیمه خاص (شامل tags, characters, relations)
     QUERY_SINGLE = """
     query ($id: Int) {
       Media(id: $id, type: ANIME) {
@@ -35,6 +35,39 @@ class AniListClient:
         studios(isMain: true) { nodes { name } }
         coverImage { large medium }
         bannerImage
+
+        tags {
+          name
+          description
+          rank
+          category
+          isGeneralSpoiler
+          isMediaSpoiler
+        }
+
+        characters(sort: [ROLE, RELEVANCE, ID], perPage: 25) {
+          edges {
+            role
+            node {
+              id
+              name { full native }
+              description(asHtml: false)
+            }
+          }
+        }
+
+        relations {
+          edges {
+            relationType
+            node {
+              id
+              title { romaji english native }
+              format
+              seasonYear
+              type
+            }
+          }
+        }
       }
     }
     """
@@ -55,7 +88,7 @@ class AniListClient:
     }
     """
 
-    def __init__(self, timeout: int = 15):
+    def __init__(self, timeout: int = 30):
         self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({
