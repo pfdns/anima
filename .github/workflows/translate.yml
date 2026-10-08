@@ -1,10 +1,12 @@
-name: Hy-MT2 Translation
+name: Translate with Hy-MT2
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'input/**'
+    inputs:
+      anilist_id:
+        description: "AniList ID"
+        required: true
+        default: "113415"
 
 jobs:
   translate:
@@ -17,19 +19,18 @@ jobs:
         with:
           lfs: true
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: pip install requests beautifulsoup4 lxml
 
       - name: Install Ollama
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
+          ollama --version
 
       - name: Kill any existing Ollama process
         run: |
@@ -39,37 +40,31 @@ jobs:
       - name: Start Ollama server
         run: |
           nohup ollama serve > /tmp/ollama.log 2>&1 &
-          sleep 8
-          curl -s http://localhost:11434/api/tags || echo "Server not ready yet"
-
-      - name: Verify GGUF model exists
-        run: |
-          ls -lh models/
-          if [ ! -f models/hy-mt2.gguf ]; then
-            echo "❌ models/hy-mt2.gguf not found!"
-            exit 1
-          fi
+          sleep 10
+          curl -s http://localhost:11434/api/tags || echo "Ollama not ready"
 
       - name: Create Ollama model from Modelfile
         run: |
-          ollama create hy-mt2:1.8b -f Modelfile
+          ls -lh models/
+          ollama create hy-mt2 -f Modelfile
           ollama list
 
-      - name: Test translation client
-        run: |
-          python3 hy_mt2_client.py
+      - name: Build Glossary from AniList
+        run: python3 glossary_builder.py ${{ github.event.inputs.anilist_id }}
 
-      - name: Show Ollama log on failure
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: glossary-${{ github.event.inputs.anilist_id }}
+          path: glossaries/
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Show Ollama logs on failure
         if: failure()
         run: |
           echo "=== Ollama log ==="
           cat /tmp/ollama.log || true
-
-      - name: Upload glossaries as artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: glossaries
-          path: glossaries/
-          if-no-files-found: warn
-          retention-days: 7
+          echo ""
+          df -h
