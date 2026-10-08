@@ -118,41 +118,6 @@ class HiAnimeClient:
 
         return subtitles
 
-    # ---------- DOWNLOAD SUBTITLE (NEW) ----------
-    def download_subtitle(
-        self,
-        url: str,
-        output_path: str,
-        referer: Optional[str] = None,
-    ) -> bool:
-        """
-        دانلود فایل زیرنویس با Referer مناسب
-        Referer برای سرورهای زیرنویس حیاتیه (بدونش 403 می‌ده)
-        """
-        # Referer پیش‌فرض برای zokoanime
-        if not referer:
-            referer = "https://zokoanime.video/"
-
-        headers = {
-            "User-Agent": self.AGENT,
-            "Referer": referer,
-            "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-
-        try:
-            r = self.session.get(url, headers=headers, timeout=30)
-            r.raise_for_status()
-
-            with open(output_path, "wb") as f:
-                f.write(r.content)
-
-            return True
-
-        except requests.exceptions.RequestException as e:
-            print(f"  ⚠️  Download error: {e}")
-            return False
-
     # ---------- M3U8 ----------
     def get_m3u8(self, anime_id: str, episode_number: str, mode: str = "sub") -> Dict:
         episodes = self.get_episodes(anime_id)
@@ -191,14 +156,86 @@ class HiAnimeClient:
             "referer": referer,
         }
 
+    # ---------- ENGLISH SUBTITLE (NEW) ----------
+    def get_english_subtitle_url(self, anime_id: str, episode_number: str) -> Optional[Dict[str, str]]:
+        """
+        گرفتن URL زیرنویس انگلیسی برای یه اپیزود
+        برمی‌گردونه: {"url": ..., "referer": ..., "label": ...}
+        """
+        result = self.get_m3u8(anime_id, episode_number)
+
+        # دنبال زیرنویس انگلیسی بگرد
+        english_sub = None
+        for sub in result.get("subtitles", []):
+            label = sub.get("label", "").lower()
+            lang = sub.get("lang", "").lower()
+            if "english" in label or lang == "en":
+                english_sub = sub
+                break
+
+        if not english_sub:
+            return None
+
+        return {
+            "url": english_sub["url"],
+            "label": english_sub["label"],
+            "referer": result["referer"],
+        }
+
+    # ---------- DOWNLOAD SUBTITLE ----------
+    def download_subtitle(
+        self,
+        url: str,
+        output_path: str,
+        referer: Optional[str] = None,
+    ) -> bool:
+        """دانلود فایل زیرنویس با Referer مناسب"""
+        if not referer:
+            referer = "https://zokoanime.video/"
+
+        headers = {
+            "User-Agent": self.AGENT,
+            "Referer": referer,
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+
+        try:
+            r = self.session.get(url, headers=headers, timeout=30)
+            r.raise_for_status()
+
+            with open(output_path, "wb") as f:
+                f.write(r.content)
+
+            return True
+
+        except requests.exceptions.RequestException as e:
+            print(f"  ⚠️  Download error: {e}")
+            return False
+
 
 if __name__ == "__main__":
     client = HiAnimeClient(proxy="http://127.0.0.1:2080")
-    result = client.get_m3u8("jujutsu-kaisen-237", "6")
-    print(f"Referer: {result['referer']}")
-    print(f"m3u8: {result['m3u8'][:80]}...")
-    print()
-    print(f"Subtitles ({len(result['subtitles'])}):")
-    for sub in result["subtitles"]:
-        print(f"  [{sub['label']}]")
-        print(f"  {sub['url'][:80]}...")
+
+    # تست ۱: get_english_subtitle_url
+    print("=== Test: get_english_subtitle_url ===")
+    sub = client.get_english_subtitle_url("jujutsu-kaisen-237", "6")
+    if sub:
+        print(f"  ✅ Found: {sub['label']}")
+        print(f"     URL: {sub['url'][:80]}...")
+        print(f"     Referer: {sub['referer']}")
+    else:
+        print("  ❌ No English subtitle found")
+
+    # تست ۲: download_subtitle
+    print("\n=== Test: download_subtitle ===")
+    if sub:
+        path = "/tmp/test_subtitle.vtt"
+        if client.download_subtitle(sub["url"], path, referer=sub["referer"]):
+            print(f"  ✅ Downloaded to: {path}")
+            # چک کن محتوا
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read(300)
+            print(f"  Content preview:")
+            for line in content.split("\n")[:8]:
+                print(f"    {line}")
