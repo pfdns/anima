@@ -1,0 +1,169 @@
+name: Translate with Hy-MT2 (Local)
+
+on:
+  workflow_dispatch:
+    inputs:
+      anilist_id:
+        description: 'AniList ID'
+        required: true
+        default: '113415'
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ===== ۱. کش مدل GGUF =====
+      - name: Cache Hy-MT2 GGUF Model
+        id: cache-model
+        uses: actions/cache@v4
+        with:
+          path: models/hy-mt2.gguf
+          key: hy-mt2-1.8b-q4-v1
+
+      # ===== ۲. دانلود مدل (اگه تو کش نبود) =====
+      - name: Download Hy-MT2 GGUF
+        if: steps.cache-model.outputs.cache-hit != 'true'
+        run: |
+          echo "📥 Downloading Hy-MT2 1.8B Q4_K_M (~1.1GB)..."
+          mkdir -p models
+          wget -q --show-progress \
+            "https://huggingface.co/mradermacher/Hy-MT2-1.8B-GGUF/resolve/main/Hy-MT2-1.8B.Q4_K_M.gguf" \
+            -O models/hy-mt2.gguf
+          ls -lh models/
+
+      - name: Verify model
+        run: |
+          ls -lh models/
+          file models/hy-mt2.gguf
+
+      # ===== ۳. نصب Ollama =====
+      - name: Install Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama --version
+
+      # ===== ۴. راه‌اندازی Ollama server =====
+      - name: Start Ollama server
+        run: |
+          nohup ollama serve > /tmp/ollama.log 2>&1 &
+          sleep 10
+          curl -s http://localhost:11434/api/tags || echo "Ollama not ready"
+
+      # ===== ۵. ثبت مدل در Ollama =====
+      - name: Register Hy-MT2 with Ollama
+        run: |
+          cat > Modelfile << 'EOF'
+          FROM ./models/hy-mt2.gguf
+          PARAMETER temperature 0.3
+          PARAMETER top_p 0.6
+          PARAMETER top_k 20
+          PARAMETER repetition_penalty 1.05
+          PARAMETER num_predict 4096
+          EOF
+          ollama create hy-mt2 -f Modelfile
+          ollama list
+
+      # ===== ۶. تست ترجمه ساده =====
+      - name: Test simple translation
+        run: |
+          python3 -c "
+import requests
+r = requests.post('http://localhost:11434/api/generate', json={
+    'model': 'hy-mt2',
+    'prompt': 'Translate to Persian: Don\'t look inside me without permission. I hate it...',
+    'stream': False,
+    'options': {'temperature': 0.3, 'num_predict': 512}
+}, timeout=600)
+result = r.json().get('response', 'NO RESPONSE')
+print('=' * 60)
+print('  Result:')
+print('=' * 60)
+print(result)
+print('=' * 60)
+"
+
+      # ===== ۷. ساخت Glossary =====
+      - name: Install Python dependencies
+        run: pip install requests beautifulsoup4 lxml
+
+      - name: Build Glossary from AniList
+        run: python3 glossary_builder.py ${{ github.event.inputs.anilist_id }}
+
+      # ===== ۸. ترجمه Glossary =====
+      - name: Translate Glossary to Persian
+        run: |
+          python3 << 'PYEOF'
+import requests
+import json
+
+anilist_id = "${{ github.event.inputs.anilist_id }}"
+
+with open(f"glossaries/{anilist_id}_en.json", "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+# ساخت متن از tags
+tags_lines = []
+for t in data.get("tags", [])[:15]:
+    tags_lines.append(f"- {t['name']}: {t['description'][:150]}")
+
+tags_text = "\n".join(tags_lines)
+
+prompt = f"""Translate these anime terms to Persian (Farsi).
+Context: This is for the anime "{data['title']['romaji']}".
+
+{tags_text}
+
+Output only translations, one per line."""
+
+print("🌐 Sending glossary to Hy-MT2...")
+r = requests.post('http://localhost:11434/api/generate', json={
+    'model': 'hy-mt2',
+    'prompt': prompt,
+    'stream': False,
+    'options': {'temperature': 0.3, 'num_predict': 2048}
+}, timeout=900)
+
+result = r.json().get('response', '')
+print()
+print('=' * 60)
+print('  Glossary Translation:')
+print('=' * 60)
+print(result)
+print('=' * 60)
+
+# ذخیره
+with open(f"glossaries/{anilist_id}_fa.txt", "w", encoding="utf-8") as f:
+    f.write(result)
+
+print(f"✅ Saved: glossaries/{anilist_id}_fa.txt")
+PYEOF
+
+      # ===== ۹. آپلود artifacts =====
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: glossary-${{ github.event.inputs.anilist_id }}
+          path: glossaries/
+          retention-days: 7
+
+      # ===== ۱۰. نمایش لاگ Ollama (اگه خطا داد) =====
+      - name: Show Ollama logs
+        if: failure()
+        run: |
+          echo "=== Ollama log ==="
+          cat /tmp/ollama.log || true
+          echo ""
+          echo "=== Disk usage ==="
+          df -h
+          du -sh ~/.ollama || true

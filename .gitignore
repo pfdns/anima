@@ -6,7 +6,6 @@ __pycache__/
 build/
 dist/
 *.egg-info/
-.eggs/
 
 # Virtual environments
 venv/
@@ -31,8 +30,12 @@ data/
 # Secrets
 keys.json
 
-# Models
+# Models (large files - cached in GitHub Actions)
 models/
 *.gguf
 *.bin
 .ollama/
+
+# Glossaries (generated)
+glossaries/*.json
+glossaries/*.txt
