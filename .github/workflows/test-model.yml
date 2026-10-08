@@ -1,0 +1,103 @@
+name: Test Hy-MT2 Simple
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama --version
+
+      - name: Start Ollama
+        run: |
+          nohup ollama serve > /tmp/ollama.log 2>&1 &
+          sleep 10
+
+      - name: Pull Hy-MT2 model
+        run: |
+          ollama pull hy-mt2
+          ollama list
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install requests
+
+      - name: Test 1 - Simple sentence
+        run: |
+          python3 -c "
+          import requests
+          r = requests.post('http://localhost:11434/api/generate', json={
+              'model': 'hy-mt2',
+              'prompt': 'Translate this English sentence to Persian (Farsi).\n\nEnglish: Hello, how are you today?\n\nPersian:',
+              'stream': False,
+              'options': {'temperature': 0.1, 'num_predict': 100, 'num_ctx': 512}
+          }, timeout=180)
+          print('TEST 1:', r.json().get('response', 'NO RESPONSE'))
+          "
+
+      - name: Test 2 - Subtitle line
+        run: |
+          python3 -c "
+          import requests
+          r = requests.post('http://localhost:11434/api/generate', json={
+              'model': 'hy-mt2',
+              'prompt': 'Translate this English sentence to Persian (Farsi).\n\nEnglish: Don\\'t look inside me without permission. I hate it...\n\nPersian:',
+              'stream': False,
+              'options': {'temperature': 0.1, 'num_predict': 100, 'num_ctx': 512}
+          }, timeout=180)
+          print('TEST 2:', r.json().get('response', 'NO RESPONSE'))
+          "
+
+      - name: Test 3 - Anime term
+        run: |
+          python3 -c "
+          import requests
+          r = requests.post('http://localhost:11434/api/generate', json={
+              'model': 'hy-mt2',
+              'prompt': 'Translate this English anime term to Persian (Farsi).\n\nEnglish: Cursed Energy\n\nPersian:',
+              'stream': False,
+              'options': {'temperature': 0.1, 'num_predict': 50, 'num_ctx': 512}
+          }, timeout=180)
+          print('TEST 3:', r.json().get('response', 'NO RESPONSE'))
+          "
+
+      - name: Test 4 - No instruction (raw)
+        run: |
+          python3 -c "
+          import requests
+          r = requests.post('http://localhost:11434/api/generate', json={
+              'model': 'hy-mt2',
+              'prompt': 'Hello, how are you today?',
+              'stream': False,
+              'options': {'temperature': 0.1, 'num_predict': 100, 'num_ctx': 512}
+          }, timeout=180)
+          print('TEST 4 (raw):', r.json().get('response', 'NO RESPONSE'))
+          "
+
+      - name: Test 5 - Ask model info
+        run: |
+          python3 -c "
+          import requests
+          r = requests.post('http://localhost:11434/api/show', json={'name': 'hy-mt2'}, timeout=30)
+          print('MODEL INFO:')
+          print(r.json())
+          "
+
+      - name: Show logs
+        if: always()
+        run: |
+          echo "=== Ollama log ==="
+          cat /tmp/ollama.log | tail -20
